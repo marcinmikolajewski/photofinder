@@ -371,3 +371,7 @@ Gotowe dashboardy można zaimportować do Grafany z grafana.com korzystając z I
 | Monitoring       | Prometheus, Grafana, Micrometer          |
 | Dokumentacja API | SpringDoc OpenAPI (Swagger)              |
 | Konteneryzacja   | Docker, Docker Compose                   |
+
+## Licencja
+
+Projekt jest udostępniany na licencji [GNU AGPL v3.0](LICENSE). Pochodne wersje, także udostępniane jako usługa sieciowa, muszą być publikowane na tej samej licencji wraz z kodem źródłowym.

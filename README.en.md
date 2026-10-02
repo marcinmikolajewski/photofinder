@@ -371,3 +371,7 @@ Ready-to-use Grafana dashboards can be imported using these IDs from grafana.com
 | Monitoring       | Prometheus, Grafana, Micrometer          |
 | API Docs         | SpringDoc OpenAPI (Swagger)              |
 | Containerization | Docker, Docker Compose                   |
+
+## License
+
+This project is licensed under the [GNU AGPL v3.0](LICENSE). Derivative works, including those offered as a network service, must be released under the same license with their source code.
