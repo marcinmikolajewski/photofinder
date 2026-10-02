@@ -1,0 +1,12 @@
+# Auto-provisioning źródła danych Loki w Grafanie (montowane do
+# /etc/grafana/provisioning/datasources/). Po starcie Grafany Loki jest
+# od razu dostępne w Explore/dashboardach — bez ręcznego dodawania.
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    editable: true

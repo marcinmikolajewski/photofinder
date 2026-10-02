@@ -1,0 +1,101 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.16'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.cyclonedx.bom' version '3.4.1'
+}
+
+group = 'com.mm.software'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    set('springAiVersion', "1.1.8")
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // web-application-type=none wyłącza główny serwer, ale actuator i tak
+    // potrzebuje serwletu, żeby wystawić osobny port zarządzania (management.server.port)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'org.springframework.retry:spring-retry'  // wymagane przez RetryInterceptorBuilder
+    implementation 'org.springframework.ai:spring-ai-starter-model-ollama'
+    implementation 'io.minio:minio:8.6.0'
+    implementation 'org.apache.httpcomponents.client5:httpclient5'
+
+    // Tracing — kontekst trace propaguje się z głównej apki przez RabbitMQ do workera
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
+    }
+    dependencies {
+        // io.minio:minio:8.6.0 ciągnie bcprov-jdk18on:1.81 (GHSA-574f-3g2m-x479, CVSS 9.3 —
+        // powtórzenie keystreamu CTR po 255 blokach). Ani Boot BOM, ani spring-ai-bom go nie
+        // zarządzają, więc wymuszamy wersję z backportowaną poprawką jawnie.
+        dependency 'org.bouncycastle:bcprov-jdk18on:1.85'
+    }
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'ollama-worker.jar'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// SBOM (CycloneDX) do skanowania podatności w Dependency-Track — osobny artefakt/deployment
+// od głównej apki, więc śledzony w Dependency-Track jako osobny projekt ("ollama-worker").
+cyclonedxBom {
+    schemaVersion = "VERSION_16"
+    projectType = "application"
+    includeLicenseText = false
+    includeBuildSystem = true
+}
+
+tasks.register('uploadBomToDependencyTrack', Exec) {
+    dependsOn tasks.named('cyclonedxBom')
+    group = 'verification'
+    description = 'Wysyła wygenerowany SBOM (CycloneDX) do Dependency-Track (domyślnie lokalny ' +
+            'dtrack-apiserver z ~/docker/llama.yaml). Wymaga zmiennej DEPENDENCY_TRACK_API_KEY; ' +
+            'DEPENDENCY_TRACK_URL można nadpisać, gdy Dependency-Track jest gdzie indziej.'
+
+    doFirst {
+        String url = System.getenv('DEPENDENCY_TRACK_URL') ?: 'http://localhost:8083'
+        String apiKey = System.getenv('DEPENDENCY_TRACK_API_KEY')
+        if (!apiKey) {
+            throw new GradleException(
+                    'Brak DEPENDENCY_TRACK_API_KEY w zmiennych środowiskowych (klucz z Dependency-Track: ' +
+                    'Administration > Access Management > Teams > API Keys).')
+        }
+        File bomFile = layout.buildDirectory.file('reports/cyclonedx/bom.json').get().asFile
+        commandLine 'curl', '--fail-with-body', '-sS',
+                "${url}/api/v1/bom",
+                '-H', "X-Api-Key: ${apiKey}",
+                '-F', 'autoCreate=true',
+                '-F', "projectName=${project.name}",
+                '-F', "projectVersion=${project.version}",
+                '-F', "bom=@${bomFile}"
+    }
+}

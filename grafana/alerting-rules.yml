@@ -1,0 +1,241 @@
+# Auto-provisioning reguł alertowych Grafana Unified Alerting.
+# Domyślny kontakt to wbudowany "grafana-default-email" — SMTP nie jest
+# skonfigurowany (brak GF_SMTP_* w docker-compose.yml), więc maile nie
+# wyjdą, ale alerty i tak są widoczne na żywo w Grafana > Alerting
+# (stan Pending/Firing, historia, adnotacje na dashboardach).
+# Żeby dostawać realne powiadomienia (mail/Discord/Slack), trzeba dopiąć
+# kontakt (SMTP albo webhook) i podmienić domyślną politykę powiadomień.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: photofinder-infra
+    folder: Alerts
+    interval: 1m
+    rules:
+      - uid: pf-target-down
+        title: Monitorowany target nie odpowiada
+        condition: B
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Target {{ $labels.job }}/{{ $labels.instance }} jest DOWN od 5 minut'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: ae2jcdxwmps00d
+            model:
+              expr: up == 0
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+
+      - uid: pf-dlq-depth
+        title: Wiadomości w Dead Letter Queue
+        condition: B
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'W kolejce DLQ jest {{ $values.A }} nieprzetworzonych wiadomości'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: ae2jcdxwmps00d
+            model:
+              expr: rabbitmq_queue_messages{queue="dlq"}
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+
+      - uid: pf-disk-low
+        title: Mało wolnego miejsca na dysku
+        condition: B
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Wolne miejsce na {{ $labels.mountpoint }} spadło poniżej 10%'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: ae2jcdxwmps00d
+            model:
+              expr: >-
+                node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} /
+                node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.10
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+
+      - uid: pf-ai-error-rate
+        title: Wzrost błędów opisywania zdjęć przez AI
+        condition: B
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Błędy AI rosną: {{ $values.A }}/s w ostatnich 5 minutach'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: ae2jcdxwmps00d
+            model:
+              expr: rate(photos_describe_errors_total[5m])
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+
+
+      - uid: pf-photo-latency
+        title: Długi czas przetwarzania zdjęcia
+        condition: B
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Średni czas AI > 2s'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: ae2jcdxwmps00d
+            model:
+              expr: rate(photos_ai_processing_seconds_sum[5m]) / rate(photos_ai_processing_seconds_count[5m])
+              instant: true
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+
+      - uid: pf-retry-count
+        title: Liczba ponów > 3
+        condition: B
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Retry count > 3'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []

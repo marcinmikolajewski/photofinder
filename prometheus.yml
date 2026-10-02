@@ -1,0 +1,62 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+
+  # Aplikacja Spring Boot — metryki biznesowe + JVM + HTTP
+  # port 8081 = management.server.port (oddzielony od API)
+  - job_name: 'photofinder'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: [ '192.168.0.35:8081' ]
+
+  # RabbitMQ — kolejki, konsumery, wiadomości
+  - job_name: 'rabbitmq'
+    static_configs:
+      - targets: [ 'rabbitmq:15692' ]
+
+  # MongoDB — połączenia, operacje, replikacja
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: [ 'mongo-exporter:9216' ]
+
+  # MinIO — storage, operacje S3
+  - job_name: 'minio'
+    metrics_path: '/minio/v2/metrics/cluster'
+    static_configs:
+      - targets: [ 'minio:9000' ]
+
+  # NVIDIA GPU — VRAM, obciążenie, temperatura
+  - job_name: 'nvidia-dcgm'
+    static_configs:
+      - targets: [ 'nvidia-dcgm-exporter:9400' ]
+
+  # Qdrant — kolekcje, wektory, REST/gRPC
+  - job_name: 'qdrant'
+    static_configs:
+      - targets: [ 'qdrant:6333' ]
+
+  # Rozproszone węzły ollama-worker (laptopy) — lista maszyn w osobnym
+  # pliku, patrz prometheus-targets/ollama-workers.yml
+  - job_name: 'ollama-worker'
+    metrics_path: '/actuator/prometheus'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets/ollama-workers.yml'
+        refresh_interval: 30s
+
+  # System — CPU, RAM, dysk, sieć
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: [ 'node-exporter:9100' ]
+
+  # Kontenery Docker — CPU, pamięć per kontener
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: [ 'cadvisor:8080' ]
+
+  # Prometheus sam siebie monitoruje
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: [ 'localhost:9090' ]

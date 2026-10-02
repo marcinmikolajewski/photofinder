@@ -1,0 +1,23 @@
+package eu.mm.software.photofinder.photosattribute.infrastructure.ai;
+
+import eu.mm.software.photofinder.photosattribute.domain.AiProvider;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class CohereAiService extends AbstractAiService {
+    private final CohereAiCaller cohereAiCaller;
+
+    @Override
+    public AiProvider getProvider() {
+        return AiProvider.COHERE;
+    }
+
+    @Override
+    protected eu.mm.software.photofinder.photosattribute.application.query.ResponseAiDto callModel(byte[] imageData, String prompt) {
+        return cohereAiCaller.callModel(imageData, prompt);
+    }
+}
