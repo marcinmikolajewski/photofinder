@@ -221,6 +221,8 @@ Zbuduj obraz aplikacji i uruchom wszystkie usługi:
 docker compose --profile prod up -d
 ```
 
+Szczegółowy opis znajdziesz w [przewodniku Docker Compose](README.docker.pl.md).
+
 ### 5. Pobranie modeli do Ollamy
 
 Po starcie kontenera Ollama pobierz modele:

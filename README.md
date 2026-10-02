@@ -221,6 +221,8 @@ Build the application image and start all services:
 docker compose --profile prod up -d
 ```
 
+See the [Docker Compose setup guide](README.docker.md) for a detailed walkthrough.
+
 ### 5. Pull Ollama models
 
 Once the Ollama container is running, pull the required models:
