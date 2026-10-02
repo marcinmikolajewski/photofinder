@@ -1,60 +1,62 @@
+English | [Polski](README.pl.md)
+
 # PhotoFinder
 
-Aplikacja do analizy i wyszukiwania zdjęć przy użyciu sztucznej inteligencji. Wysyłasz zdjęcia do wybranego dostawcy AI (lokalnego lub chmurowego), który generuje opisy. Opisy trafiają do wektorowej bazy danych, dzięki czemu możesz wyszukiwać zdjęcia po treści naturalnym językiem — np. „zachód słońca nad jeziorem" zamiast nazwy pliku.
+An application for analyzing and searching photos using artificial intelligence. You send photos to a chosen AI provider (local or cloud-based), which generates descriptions. Those descriptions are stored in a vector database, enabling semantic photo search — e.g. "sunset over a lake" instead of a filename.
 
 ---
 
-## Funkcje
+## Features
 
-- Opis zdjęć przez 13 różnych dostawców AI (lokalnych i chmurowych)
-- Wyszukiwanie semantyczne po opisie (vector search)
-- Asynchroniczne przetwarzanie przez kolejki wiadomości (RabbitMQ)
-- Obsługa błędów przez Dead Letter Queue z automatycznym audytem
-- Moduł **ollama-worker** — lekka aplikacja uruchamiana na dowolnym komputerze w sieci, która przetwarza zdjęcia lokalnym Ollama (CPU lub GPU)
-- Dane EXIF dołączane do promptu AI (model kamery, czas naświetlania, ISO)
-- Identyfikacja węzła roboczego (hostname + CPU) w audycie
-- JWT-based uwierzytelnianie
-- Panel monitorowania (Prometheus + Grafana)
-- REST API z dokumentacją OpenAPI/Swagger
+- Photo description via 13 different AI providers (local and cloud)
+- Semantic search on photo descriptions (vector search)
+- Asynchronous processing through message queues (RabbitMQ)
+- Error handling via Dead Letter Queue with automatic auditing
+- **ollama-worker** module — a lightweight app that runs on any machine in your LAN and processes photos using a local Ollama instance (CPU or GPU)
+- EXIF data injected into the AI prompt (camera model, exposure time, ISO)
+- Worker node identification (hostname + CPU) tracked in the audit log
+- JWT-based authentication
+- Monitoring dashboard (Prometheus + Grafana)
+- REST API with OpenAPI/Swagger documentation
 
 ---
 
-## Architektura
+## Architecture
 
-### Ogólny schemat
+### Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        PhotoFinder App                      │
-│                       (Spring Boot 3.5)                     │
-│                                                             │
-│  ┌─────────────┐  ┌───────────────┐ ┌────────────────────┐  │
-│  │  photoparams│  │photosattribute│ │       user         │  │
-│  │  (pliki)    │  │  (AI + opisy) │ │ (autentykacja)     │  │
-│  └─────────────┘  └───────────────┘ └────────────────────┘  │
-└──────────────────────────────┬──────────────────────────────┘
+│                        PhotoFinder App                       │
+│                       (Spring Boot 3.5)                      │
+│                                                              │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐  │
+│  │  photoparams │  │photosattribute│  │       user         │  │
+│  │  (files)     │  │  (AI + desc)  │  │  (authentication)  │  │
+│  └─────────────┘  └──────────────┘  └────────────────────┘  │
+└──────────────────────────────┬───────────────────────────────┘
                                │
           ┌────────────────────┼────────────────────┐
           │                    │                    │
     ┌─────▼─────┐      ┌───────▼──────┐     ┌──────▼──────┐
-    │  MongoDB  │      │   RabbitMQ   │     │   Qdrant    │
-    │ (metadane)│      │  (kolejki)   │     │  (wektory)  │
+    │  MongoDB   │      │   RabbitMQ   │     │   Qdrant    │
+    │ (metadata) │      │  (queues)    │     │  (vectors)  │
     └───────────┘      └──────┬───────┘     └─────────────┘
           │                   │
     ┌─────▼─────┐      ┌──────▼───────┐
-    │   MinIO   │      │  ollama-     │  ← osobna aplikacja
-    │(tmp pliki)│      │  worker      │    w sieci lokalnej
+    │   MinIO    │      │  ollama-     │  ← separate app
+    │(temp files)│      │  worker      │    on any LAN machine
     └───────────┘      └──────────────┘
 ```
 
-### Przepływ przetwarzania zdjęcia
+### Photo processing flow
 
 ```
 REST API → MongoDB (PENDING) → MinIO (tmp) → RabbitMQ (ai.<provider>.queue)
                                                         │
                         ┌───────────────────────────────┤
-                        │ wbudowany PhotosConsumer       │ zewnętrzny OllamaWorker
-                        │ (wszystkie providery)          │ (ollama-worker na innym PC)
+                        │ built-in PhotosConsumer        │ external OllamaWorker
+                        │ (all providers)                │ (ollama-worker on another PC)
                         └───────────────┬───────────────┘
                                         │
                               PhotoProcessedEvent
@@ -74,108 +76,108 @@ REST API → MongoDB (PENDING) → MinIO (tmp) → RabbitMQ (ai.<provider>.queue
                                                     Ollama (embedding)
                                                     Qdrant (vector store)
                                                               │
-                                              Wyszukiwanie ← REST API
+                                              Semantic search ← REST API
 ```
 
-### Obsługa błędów (DLQ)
+### Error handling (DLQ)
 
 ```
-ai.<provider>.queue → 3 retry → DLQ
-                                 │
-                       DeadLetterConsumer
-                                 │
+ai.<provider>.queue → 3 retries → DLQ
+                                   │
+                         DeadLetterConsumer
+                                   │
                     MongoDB (ERROR) + PhotoAuditedEvent
 ```
 
-### Struktura kodu (architektura heksagonalna)
+### Code structure (hexagonal architecture)
 
 ```
 photofinder/
 ├── src/main/java/eu/mm/software/photofinder/
-│   ├── common/                    # konfiguracja, security, metryki
+│   ├── common/                    # configuration, security, metrics
 │   │   ├── config/                # RabbitMQ, AI, Async
 │   │   ├── security/              # JWT, Spring Security
-│   │   └── metrics/               # metryki Prometheus
+│   │   └── metrics/               # Prometheus metrics
 │   │
-│   ├── photosattribute/           # główny moduł — analiza AI i opisy
-│   │   ├── domain/                # encje, repozytoria (interfejsy), eventy
-│   │   ├── application/           # logika biznesowa (command/query)
+│   ├── photosattribute/           # core module — AI analysis and descriptions
+│   │   ├── domain/                # entities, repository interfaces, events
+│   │   ├── application/           # business logic (command/query)
 │   │   ├── infrastructure/
-│   │   │   ├── ai/                # implementacje 13 dostawców AI
-│   │   │   ├── rabbit/            # konsumery i producenci RabbitMQ
-│   │   │   │   ├── PhotosConsumer         # przetwarzanie przez AI (wbudowane)
-│   │   │   │   ├── PhotoPersistenceConsumer # zapis do MongoDB + audit event
-│   │   │   │   ├── EmbeddedConsumer       # generowanie embeddingów (Qdrant)
-│   │   │   │   ├── AuditConsumer          # zapis audytu
-│   │   │   │   └── DeadLetterConsumer     # obsługa DLQ
+│   │   │   ├── ai/                # implementations for 13 AI providers
+│   │   │   ├── rabbit/            # RabbitMQ consumers and producers
+│   │   │   │   ├── PhotosConsumer           # built-in AI processing
+│   │   │   │   ├── PhotoPersistenceConsumer # saves to MongoDB + audit event
+│   │   │   │   ├── EmbeddedConsumer         # generates embeddings (Qdrant)
+│   │   │   │   ├── AuditConsumer            # writes audit records
+│   │   │   │   └── DeadLetterConsumer       # handles DLQ failures
 │   │   │   ├── repository/        # MongoDB
 │   │   │   ├── vectordb/          # Qdrant
 │   │   │   └── starage/           # MinIO
-│   │   └── interfaces/rest/       # kontrolery REST
+│   │   └── interfaces/rest/       # REST controllers
 │   │
-│   ├── photoparams/               # przeglądanie plików na dysku
-│   └── user/                      # zarządzanie użytkownikami
+│   ├── photoparams/               # browsing files on disk
+│   └── user/                      # user management
 │
-└── ollama-worker/                 # oddzielna aplikacja — węzeł CPU/GPU
+└── ollama-worker/                 # separate app — CPU/GPU worker node
     └── src/main/java/eu/mm/software/photofinder/worker/
         ├── OllamaWorkerApplication    # Spring Boot (non-web)
-        ├── OllamaWorkerConsumer       # nasłuchuje ai.ollama.queue
-        ├── WorkerNodeInfo             # auto-detect hostname + CPU
+        ├── OllamaWorkerConsumer       # listens on ai.ollama.queue
+        ├── WorkerNodeInfo             # auto-detects hostname + CPU
         ├── config/                    # RabbitMQ, MinIO
         ├── event/                     # PhotoJobMessage, PhotoProcessedEvent
         └── storage/                   # WorkerMinioStorage
 ```
 
-### Obsługiwani dostawcy AI
+### Supported AI providers
 
-| Dostawca      | Typ      | Płatny |
-|---------------|----------|--------|
-| Ollama        | lokalny  | nie    |
-| Groq          | chmura   | nie    |
-| Cerebras      | chmura   | nie    |
-| CloudFlare    | chmura   | nie    |
-| Gemini        | chmura   | nie    |
-| OpenRouter    | chmura   | nie    |
-| Cohere        | chmura   | nie    |
-| Mistral       | chmura   | tak*   |
-| NVIDIA NIM    | chmura   | tak*   |
-| Together AI   | chmura   | tak    |
-| OpenAI        | chmura   | tak    |
-| Anthropic     | chmura   | tak    |
-| Hyperbolic    | chmura   | tak    |
+| Provider      | Type   | Paid  |
+|---------------|--------|-------|
+| Ollama        | local  | no    |
+| Groq          | cloud  | no    |
+| Cerebras      | cloud  | no    |
+| CloudFlare    | cloud  | no    |
+| Gemini        | cloud  | no    |
+| OpenRouter    | cloud  | no    |
+| Cohere        | cloud  | no    |
+| Mistral       | cloud  | yes*  |
+| NVIDIA NIM    | cloud  | yes*  |
+| Together AI   | cloud  | yes   |
+| OpenAI        | cloud  | yes   |
+| Anthropic     | cloud  | yes   |
+| Hyperbolic    | cloud  | yes   |
 
-\* darmowy plan dostępny
+\* free tier available
 
 ---
 
-## Wymagania
+## Requirements
 
 - Java 21
-- Docker i Docker Compose
-- Karta graficzna NVIDIA z CUDA (dla Ollama z GPU) — opcjonalne
-- Klucze API dla wybranych dostawców chmurowych
+- Docker and Docker Compose
+- NVIDIA GPU with CUDA (for Ollama with GPU acceleration) — optional
+- API keys for chosen cloud providers
 
 ---
 
-## Uruchomienie
+## Getting started
 
-### 1. Klonowanie repozytorium
+### 1. Clone the repository
 
 ```bash
-git clone <url-repozytorium>
+git clone <repository-url>
 cd photofinder
 ```
 
-### 2. Konfiguracja zmiennych środowiskowych
+### 2. Configure environment variables
 
-Utwórz plik `.env` w katalogu głównym projektu:
+Create a `.env` file in the project root:
 
 ```env
-# Wymagane
-MONGO_PASSWORD=twoje_haslo_mongo
-JWT_SECRET_KEY=wygeneruj_kluczem_ponizej
+# Required
+MONGO_PASSWORD=your_mongo_password
+JWT_SECRET_KEY=generate_with_command_below
 
-# Dostawcy AI (uzupełnij tylko te, których chcesz używać)
+# AI providers (fill in only the ones you want to use)
 MISTRAL_API_KEY=
 NVIDIA_API_KEY=
 OPENAI_API_KEY=
@@ -190,147 +192,147 @@ OPENROUTER_API_KEY=
 CLOUDFLARE_API_KEY=
 CLOUD_FLARE_USER_ID=
 
-# MinIO (opcjonalne — domyślne wartości działają lokalnie)
+# MinIO (optional — defaults work locally)
 MINIO_USER=minioadmin
 MINIO_PASSWORD=miniopassword
 ```
 
-Generowanie klucza JWT:
+Generate a JWT secret key:
 ```bash
 openssl rand -base64 64
 ```
 
-### 3. Uruchomienie infrastruktury (tryb developerski)
+### 3. Start infrastructure (development mode)
 
-Spring Boot automatycznie uruchamia Docker Compose przy starcie. Wystarczy uruchomić aplikację:
+Spring Boot automatically starts Docker Compose on launch. Just run:
 
 ```bash
 ./gradlew bootRun
 ```
 
-Przy pierwszym uruchomieniu Docker pobierze obrazy: MongoDB, RabbitMQ, Qdrant, MinIO, Ollama, Prometheus, Grafana i inne.
+On first run Docker will pull all required images: MongoDB, RabbitMQ, Qdrant, MinIO, Ollama, Prometheus, Grafana, and more.
 
-### 4. Uruchomienie całości w Dockerze (tryb produkcyjny)
+### 4. Full Docker deployment (production mode)
 
-Zbuduj obraz aplikacji i uruchom wszystkie usługi:
+Build the application image and start all services:
 
 ```bash
 ./gradlew bootWar
 docker compose --profile prod up -d
 ```
 
-### 5. Pobranie modeli do Ollamy
+### 5. Pull Ollama models
 
-Po starcie kontenera Ollama pobierz modele:
+Once the Ollama container is running, pull the required models:
 
 ```bash
-# Model do opisu zdjęć (vision)
+# Vision model for photo description
 docker exec ollama-gpu ollama pull llava:13b
 
-# Model do embeddingów (wyszukiwanie wektorowe)
+# Embedding model for vector search
 docker exec ollama-gpu ollama pull qllama/bge-large-en-v1.5
 ```
 
 ---
 
-## Moduł ollama-worker
+## ollama-worker module
 
-`ollama-worker` to lekka, samodzielna aplikacja Spring Boot (bez serwera HTTP), którą możesz uruchomić na dowolnym komputerze w sieci lokalnej. Pobiera zadania z kolejki RabbitMQ, przetwarza zdjęcia lokalnym Ollama i odsyła wyniki do głównej aplikacji.
+`ollama-worker` is a lightweight, standalone Spring Boot application (no HTTP server) that you can run on any machine in your local network. It picks up jobs from a RabbitMQ queue, processes photos using a local Ollama instance, and sends results back to the main application.
 
-Przydatna gdy:
-- masz kilka komputerów z różnymi GPU/CPU i chcesz rozłożyć przetwarzanie
-- główny serwer nie ma GPU, ale inne maszyny w sieci już tak
+Useful when:
+- you have multiple machines with different GPUs/CPUs and want to distribute the workload
+- the main server has no GPU, but other machines on the network do
 
-### Konfiguracja (`ollama-worker/src/main/resources/application.properties`)
+### Configuration (`ollama-worker/src/main/resources/application.properties`)
 
 ```properties
-# Identyfikacja węzła (pusta = auto-detect z hostname + /proc/cpuinfo)
-worker.node.name=PC-Salon
+# Node label (blank = auto-detect from hostname + /proc/cpuinfo)
+worker.node.name=Living-Room-PC
 
-# Model Ollama (musi być pobrany na tym komputerze)
+# Ollama model (must be pulled on this machine)
 ollama.model.name=llava:13b
 
-# Adres głównego komputera z photofinder
+# Address of the main photofinder server
 spring.rabbitmq.host=192.168.0.35
 minio.endpoint=http://192.168.0.35:9000
 
-# Lokalny Ollama
+# Local Ollama instance
 spring.ai.ollama.base-url=http://localhost:11434
 ```
 
-### Uruchomienie
+### Running
 
 ```bash
 cd ollama-worker
 ../gradlew bootRun
 ```
 
-Worker automatycznie wykrywa hostname i model CPU z `/proc/cpuinfo`. Obie informacje zapisywane są w audycie każdego przetworzonego zdjęcia.
+The worker auto-detects its hostname and CPU model from `/proc/cpuinfo`. Both are recorded in the audit entry for every processed photo.
 
 ---
 
-## Adresy serwisów po uruchomieniu
+## Service URLs
 
-| Serwis            | Adres                                  | Opis                        |
+| Service           | URL                                    | Notes                       |
 |-------------------|----------------------------------------|-----------------------------|
-| Aplikacja REST    | http://localhost:8081                  | główne API                  |
-| Swagger UI        | http://localhost:8081/swagger-ui.html  | dokumentacja API            |
+| REST API          | http://localhost:8081                  | main API                    |
+| Swagger UI        | http://localhost:8081/swagger-ui.html  | API documentation           |
 | RabbitMQ Panel    | http://localhost:15672                 | login: admin / admin        |
 | MongoDB           | localhost:27017                        |                             |
-| Qdrant UI         | http://localhost:6333/dashboard        | baza wektorów               |
-| MinIO Console     | http://localhost:9001                  | przechowywanie plików       |
+| Qdrant UI         | http://localhost:6333/dashboard        | vector database             |
+| MinIO Console     | http://localhost:9001                  | file storage                |
 | Ollama            | http://localhost:11434                 |                             |
-| Open WebUI        | http://localhost:3500                  | chat z lokalnymi modelami   |
-| Prometheus        | http://localhost:9090                  | metryki                     |
+| Open WebUI        | http://localhost:3500                  | chat with local models      |
+| Prometheus        | http://localhost:9090                  | metrics                     |
 | Grafana           | http://localhost:3050                  | login: admin / example      |
 
 ---
 
-## Przykładowe użycie API
+## API usage examples
 
-### Rejestracja i logowanie
+### Register and log in
 
 ```bash
-# Rejestracja
+# Register
 curl -X POST http://localhost:8081/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"haslo123","firstName":"Jan","lastName":"Kowalski"}'
+  -d '{"email":"user@example.com","password":"password123","firstName":"John","lastName":"Doe"}'
 
-# Logowanie — zwraca token JWT
+# Log in — returns a JWT token
 curl -X POST http://localhost:8081/api/v1/auth/authenticate \
   -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"haslo123"}'
+  -d '{"email":"user@example.com","password":"password123"}'
 ```
 
-### Wylistowanie zdjęć na dysku
+### List photos on disk
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
   "http://localhost:8081/rest/api/v1/file?path=/media/nas/foto&extensions=JPG,PNG"
 ```
 
-### Opisanie zdjęcia przez AI
+### Describe a photo using AI
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
   "http://localhost:8081/rest/api/v1/photos/describePhoto?filepath=/media/nas/foto/IMG_001.jpg&provider=OLLAMA"
 ```
 
-### Wyszukiwanie semantyczne
+### Semantic search
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8081/rest/api/v1/photos/search?prompt=zachód słońca nad morzem&limit=10"
+  "http://localhost:8081/rest/api/v1/photos/search?prompt=sunset+over+the+sea&limit=10"
 ```
 
-### Podgląd audytu
+### View audit log
 
 ```bash
-# Lista audytów dla zalogowanego użytkownika
+# Audit entries for the logged-in user
 curl -H "Authorization: Bearer <token>" \
   "http://localhost:8081/rest/api/v1/audit"
 
-# Statystyki audytu (czas przetwarzania, tokeny, węzeł)
+# Audit stats (processing time, tokens, worker node)
 curl -H "Authorization: Bearer <token>" \
   "http://localhost:8081/rest/api/v1/audit/stats"
 ```
@@ -339,39 +341,39 @@ curl -H "Authorization: Bearer <token>" \
 
 ## Monitoring
 
-Aplikacja eksportuje metryki do Prometheusa (`/actuator/prometheus`). Zbierane są dane z:
+The application exports metrics to Prometheus at `/actuator/prometheus`. Data is collected from:
 
-- aplikacji (JVM, HTTP, własne metryki biznesowe)
-- RabbitMQ (kolejki, konsumery)
+- the application (JVM, HTTP, custom business metrics)
+- RabbitMQ (queues, consumers)
 - MongoDB
 - MinIO
-- GPU NVIDIA (VRAM, temperatura, obciążenie)
-- systemu (CPU, RAM, dysk)
-- kontenerów Docker
+- NVIDIA GPU (VRAM, temperature, load)
+- the host system (CPU, RAM, disk)
+- Docker containers
 
-Gotowe dashboardy można zaimportować do Grafany z grafana.com korzystając z ID:
+Ready-to-use Grafana dashboards can be imported using these IDs from grafana.com:
 - **4701** — JVM (Micrometer)
 - **10991** — RabbitMQ
 - **7362** — MongoDB
 
 ---
 
-## Stos technologiczny
+## Tech stack
 
-| Kategoria        | Technologia                              |
+| Category         | Technology                               |
 |------------------|------------------------------------------|
 | Backend          | Spring Boot 3.5, Java 21                 |
 | Build            | Gradle (multi-project)                   |
-| Baza danych      | MongoDB (metadane), Qdrant (wektory)     |
-| Kolejkowanie     | RabbitMQ                                 |
+| Database         | MongoDB (metadata), Qdrant (vectors)     |
+| Messaging        | RabbitMQ                                 |
 | Storage          | MinIO (S3-compatible)                    |
 | AI Framework     | Spring AI 1.1                            |
-| Lokalne LLM      | Ollama                                   |
-| Bezpieczeństwo   | Spring Security, JWT                     |
+| Local LLM        | Ollama                                   |
+| Security         | Spring Security, JWT                     |
 | Monitoring       | Prometheus, Grafana, Micrometer          |
-| Dokumentacja API | SpringDoc OpenAPI (Swagger)              |
-| Konteneryzacja   | Docker, Docker Compose                   |
+| API Docs         | SpringDoc OpenAPI (Swagger)              |
+| Containerization | Docker, Docker Compose                   |
 
-## Licencja
+## License
 
-Projekt jest udostępniany na licencji [GNU AGPL v3.0](LICENSE). Pochodne wersje, także udostępniane jako usługa sieciowa, muszą być publikowane na tej samej licencji wraz z kodem źródłowym.
+This project is licensed under the [GNU AGPL v3.0](LICENSE). Derivative works, including those offered as a network service, must be released under the same license with their source code.
